@@ -309,7 +309,6 @@ function renderDetail() {
         <button class="nav-button" type="button" data-action="home">戻る</button>
         <button class="icon-button" type="button" data-action="toggle-pin" data-note-id="${escapeHtml(note.id)}" aria-label="固定" title="固定">${note.pinned ? "📌" : "☆"}</button>
         <button class="icon-button" type="button" data-action="open-tag-dialog" aria-label="タグ" title="タグ">🏷</button>
-        <button class="nav-button" type="button" data-action="home">完了</button>
       </div>
     </footer>
     ${renderTagDialog(note)}

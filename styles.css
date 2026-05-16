@@ -471,7 +471,7 @@ button {
 
 .bottom-nav {
   display: grid;
-  grid-template-columns: 1fr 52px 52px 1fr;
+  grid-template-columns: 1fr 52px 52px;
   gap: 8px;
   align-items: center;
 }
