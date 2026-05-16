@@ -1,0 +1,19 @@
+{
+  "name": "メモ帳",
+  "short_name": "メモ帳",
+  "description": "iPhone Safariで使うローカル保存メモアプリ",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#dce8df",
+  "theme_color": "#dce8df",
+  "icons": [
+    {
+      "src": "./assets/app-icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
