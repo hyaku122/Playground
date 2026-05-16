@@ -1,6 +1,6 @@
 const STORAGE_KEY = "memocho.v1";
 const BACKUP_PREFIX = "MEMOCHO:";
-const MARKERS = ["📝", "🛍️", "📅", "💡", "🏠", "🍳", "📚", "🎁", "🌿", "⭐", "📌", "🧺", "☕", "🧾", "🛠️", "🗒️", "📦", "🍮", "🍰", "🍪", "🍽️", "👗", "🍅", "🥕", "🥦"];
+const MARKERS = ["📝", "🛍️", "📅", "💡", "🏠", "🍳", "📚", "🎁", "🌿", "⭐", "📌", "🧺", "☕", "🫖", "🧾", "🛠️", "🗒️", "📦", "🍮", "🍰", "🍪", "🍽️", "👗", "🍅", "🥕", "🥦"];
 
 const app = document.getElementById("app");
 
@@ -9,6 +9,8 @@ let view = {
   screen: "home",
   noteId: null,
   selectedLineId: null,
+  noteMenuId: null,
+  tagDialog: false,
   activeTag: "",
   search: "",
   sort: "updated",
@@ -20,6 +22,9 @@ let view = {
   backupText: "",
   toast: ""
 };
+
+let longPressTimer = null;
+let longPressFired = false;
 
 registerServiceWorker();
 render();
@@ -185,12 +190,6 @@ function renderHome() {
         </div>
       </header>
 
-      <section class="quick-card" aria-label="すぐメモ">
-        <span class="section-label">すぐメモ</span>
-        <input class="field" data-field="quick-title" type="text" value="${escapeHtml(view.quickTitle)}" placeholder="タイトル" autocomplete="off">
-        <textarea class="textarea" data-field="quick-body" placeholder="本文を入力">${escapeHtml(view.quickBody)}</textarea>
-      </section>
-
       <div class="search-row">
         <input class="search-input" data-field="search" type="search" value="${escapeHtml(view.search)}" placeholder="検索" autocomplete="off">
       </div>
@@ -218,6 +217,7 @@ function renderHome() {
 
       <button class="floating-compose" type="button" data-action="new-note" aria-label="新規メモ" title="新規メモ">✎</button>
     </main>
+    ${renderNoteMenu()}
     ${renderToast()}
   `;
 }
@@ -230,10 +230,6 @@ function renderNoteCard(note) {
       <p class="preview">${escapeHtml(preview || "普通の文章だけでも使えます")}</p>
       <div class="note-meta">
         ${(note.tags || []).map((tag) => `<span class="tag-pill">${escapeHtml(tag)}</span>`).join("")}
-      </div>
-      <div class="mini-actions">
-        <button class="mini-button" type="button" data-action="toggle-pin" data-note-id="${escapeHtml(note.id)}">${note.pinned ? "固定解除" : "固定"}</button>
-        <button class="mini-button" type="button" data-action="toggle-archive" data-note-id="${escapeHtml(note.id)}">${note.archived ? "戻す" : "アーカイブ"}</button>
       </div>
     </article>
   `;
@@ -292,26 +288,7 @@ function renderDetail() {
     <main class="screen detail-screen">
       <input class="field title-input" data-field="note-title" type="text" value="${escapeHtml(note.title)}" placeholder="タイトル" autocomplete="off">
 
-      <section class="tag-editor" aria-label="タグ">
-        <span class="section-label">タグ</span>
-        <div class="chip-list">
-          ${(note.tags || []).map((tag) => `<button class="chip active" type="button" data-action="remove-note-tag" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)} ×</button>`).join("")}
-        </div>
-        <div class="tag-editor-row">
-          <select class="select" data-field="tag-select" aria-label="タグを選ぶ">
-            <option value="">タグを選ぶ</option>
-            ${getAllTags().filter((tag) => !(note.tags || []).includes(tag)).map((tag) => `<option value="${escapeHtml(tag)}">${escapeHtml(tag)}</option>`).join("")}
-          </select>
-          <button class="primary-button secondary-button" type="button" data-action="add-selected-tag">追加</button>
-        </div>
-        <div class="tag-editor-row">
-          <input class="field" data-field="new-note-tag" type="text" placeholder="新しいタグ" autocomplete="off">
-          <button class="primary-button secondary-button" type="button" data-action="add-new-note-tag">作成</button>
-        </div>
-      </section>
-
       <section class="panel outline-panel" aria-label="本文">
-        <span class="section-label">本文</span>
         ${note.outline.map((line) => renderOutlineRow(note, line)).join("")}
       </section>
     </main>
@@ -331,9 +308,11 @@ function renderDetail() {
       <div class="bottom-nav" aria-label="メモ操作">
         <button class="nav-button" type="button" data-action="home">戻る</button>
         <button class="icon-button" type="button" data-action="toggle-pin" data-note-id="${escapeHtml(note.id)}" aria-label="固定" title="固定">${note.pinned ? "📌" : "☆"}</button>
+        <button class="icon-button" type="button" data-action="open-tag-dialog" aria-label="タグ" title="タグ">🏷</button>
         <button class="nav-button" type="button" data-action="home">完了</button>
       </div>
     </footer>
+    ${renderTagDialog(note)}
     ${renderToast()}
   `;
   resizeAllLineInputs();
@@ -365,6 +344,46 @@ function renderMarkerPicker() {
   return `
     <div class="marker-picker" aria-label="見出し絵文字">
       ${MARKERS.map((marker) => `<button class="marker-button" type="button" data-action="set-marker" data-marker="${escapeHtml(marker)}">${escapeHtml(marker)}</button>`).join("")}
+    </div>
+  `;
+}
+
+function renderNoteMenu() {
+  const note = view.noteMenuId ? findNote(view.noteMenuId) : null;
+  if (!note) return "";
+  return `
+    <div class="modal-backdrop" data-action="close-modal">
+      <section class="sheet" role="dialog" aria-modal="true" aria-label="メモ操作" data-stop-close>
+        <h2>${escapeHtml(note.title || "無題のメモ")}</h2>
+        <button class="sheet-button" type="button" data-action="open-menu-note" data-note-id="${escapeHtml(note.id)}">開く</button>
+        <button class="sheet-button" type="button" data-action="toggle-pin-menu" data-note-id="${escapeHtml(note.id)}">${note.pinned ? "ピン留めを外す" : "ピン留め"}</button>
+        <button class="sheet-button" type="button" data-action="toggle-archive-menu" data-note-id="${escapeHtml(note.id)}">${note.archived ? "アーカイブから戻す" : "アーカイブ"}</button>
+        <button class="sheet-button danger-text" type="button" data-action="delete-note" data-note-id="${escapeHtml(note.id)}">削除</button>
+        <button class="sheet-button muted-text" type="button" data-action="close-modal">閉じる</button>
+      </section>
+    </div>
+  `;
+}
+
+function renderTagDialog(note) {
+  if (!view.tagDialog) return "";
+  const tags = getAllTags();
+  return `
+    <div class="modal-backdrop" data-action="close-modal">
+      <section class="sheet" role="dialog" aria-modal="true" aria-label="タグ" data-stop-close>
+        <h2>タグ</h2>
+        <div class="chip-list tag-dialog-list">
+          ${tags.length ? tags.map((tag) => {
+            const active = (note.tags || []).includes(tag);
+            return `<button class="chip ${active ? "active" : ""}" type="button" data-action="toggle-note-tag" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</button>`;
+          }).join("") : `<span class="preview">タグはまだありません</span>`}
+        </div>
+        <div class="tag-editor-row">
+          <input class="field" data-field="new-note-tag" type="text" placeholder="新しいタグ" autocomplete="off">
+          <button class="primary-button secondary-button" type="button" data-action="add-new-note-tag">作成</button>
+        </div>
+        <button class="sheet-button muted-text" type="button" data-action="close-modal">閉じる</button>
+      </section>
     </div>
   `;
 }
@@ -445,6 +464,8 @@ function openNote(noteId) {
   view.noteId = note.id;
   view.selectedLineId = note.outline[0] ? note.outline[0].id : null;
   view.markerPicker = false;
+  view.noteMenuId = null;
+  view.tagDialog = false;
   render();
 }
 
@@ -453,7 +474,18 @@ function home() {
   view.noteId = null;
   view.selectedLineId = null;
   view.markerPicker = false;
+  view.noteMenuId = null;
+  view.tagDialog = false;
   render();
+}
+
+function clearLongPressTimer() {
+  if (!longPressTimer) return;
+  window.clearTimeout(longPressTimer);
+  longPressTimer = null;
+  window.setTimeout(() => {
+    longPressFired = false;
+  }, 80);
 }
 
 function showToast(message) {
@@ -469,13 +501,43 @@ app.addEventListener("click", (event) => {
   const actionEl = event.target.closest("[data-action]");
   const openEl = event.target.closest("[data-open-note]");
   if (actionEl) {
+    if (actionEl.dataset.action === "close-modal" && actionEl.classList.contains("modal-backdrop") && event.target.closest("[data-stop-close]")) {
+      return;
+    }
     event.preventDefault();
     handleAction(actionEl);
     return;
   }
   if (openEl) {
+    if (longPressFired) {
+      longPressFired = false;
+      return;
+    }
     openNote(openEl.dataset.openNote);
   }
+});
+
+app.addEventListener("pointerdown", (event) => {
+  const card = event.target.closest("[data-open-note]");
+  if (!card || event.target.closest("[data-action]")) return;
+  clearLongPressTimer();
+  longPressTimer = window.setTimeout(() => {
+    longPressFired = true;
+    view.noteMenuId = card.dataset.openNote;
+    render();
+  }, 520);
+});
+
+app.addEventListener("pointerup", clearLongPressTimer);
+app.addEventListener("pointercancel", clearLongPressTimer);
+app.addEventListener("pointerleave", clearLongPressTimer);
+
+app.addEventListener("contextmenu", (event) => {
+  const card = event.target.closest("[data-open-note]");
+  if (!card) return;
+  event.preventDefault();
+  view.noteMenuId = card.dataset.openNote;
+  render();
 });
 
 app.addEventListener("input", (event) => {
@@ -525,6 +587,12 @@ function handleAction(el) {
   const action = el.dataset.action;
   const note = findNote(view.noteId);
 
+  if (action === "close-modal") {
+    view.noteMenuId = null;
+    view.tagDialog = false;
+    render();
+    return;
+  }
   if (action === "home") return home();
   if (action === "settings") {
     view.screen = "settings";
@@ -565,6 +633,36 @@ function handleAction(el) {
     render();
     return;
   }
+  if (action === "open-menu-note") {
+    const targetNote = findNote(el.dataset.noteId);
+    view.noteMenuId = null;
+    if (targetNote) openNote(targetNote.id);
+    return;
+  }
+  if (action === "toggle-pin-menu") {
+    const targetNote = findNote(el.dataset.noteId);
+    if (!targetNote) return;
+    targetNote.pinned = !targetNote.pinned;
+    touchNote(targetNote);
+    view.noteMenuId = null;
+    saveState();
+    render();
+    return;
+  }
+  if (action === "toggle-archive-menu") {
+    const targetNote = findNote(el.dataset.noteId);
+    if (!targetNote) return;
+    targetNote.archived = !targetNote.archived;
+    touchNote(targetNote);
+    view.noteMenuId = null;
+    saveState();
+    render();
+    return;
+  }
+  if (action === "delete-note") {
+    deleteNote(el.dataset.noteId);
+    return;
+  }
 
   if (view.screen === "detail" && note) handleDetailAction(action, el, note);
   if (view.screen === "settings") handleSettingsAction(action, el);
@@ -574,14 +672,19 @@ function handleDetailAction(action, el, note) {
   const line = selectedLine(note);
   if (!line) return;
 
-  if (action === "add-selected-tag") {
-    const select = app.querySelector('[data-field="tag-select"]');
-    addTagToNote(note, select ? select.value : "");
+  if (action === "open-tag-dialog") {
+    view.tagDialog = true;
+    render();
+    return;
+  }
+  if (action === "toggle-note-tag") {
+    toggleTagOnNote(note, el.dataset.tag);
     return;
   }
   if (action === "add-new-note-tag") {
     const input = app.querySelector('[data-field="new-note-tag"]');
     addTagToNote(note, input ? input.value : "");
+    view.tagDialog = true;
     return;
   }
   if (action === "remove-note-tag") {
@@ -776,6 +879,19 @@ function addTagToNote(note, value) {
   render();
 }
 
+function toggleTagOnNote(note, value) {
+  const tag = String(value || "").trim();
+  if (!tag) return;
+  if ((note.tags || []).includes(tag)) {
+    note.tags = note.tags.filter((item) => item !== tag);
+  } else {
+    note.tags = uniqueClean([...(note.tags || []), tag]);
+  }
+  touchNote(note);
+  saveState();
+  render();
+}
+
 function addGlobalTag(value) {
   const tag = String(value || "").trim();
   if (!tag) return;
@@ -802,6 +918,18 @@ function deleteTag(tag) {
   state.notes.forEach((note) => {
     note.tags = (note.tags || []).filter((item) => item !== tag);
   });
+  saveState();
+  render();
+}
+
+function deleteNote(noteId) {
+  const note = findNote(noteId);
+  if (!note) return;
+  const title = note.title || "無題のメモ";
+  if (!window.confirm(`「${title}」を完全に削除します。本当にいいですか？`)) return;
+  state.notes = state.notes.filter((item) => item.id !== noteId);
+  if (view.noteId === noteId) home();
+  view.noteMenuId = null;
   saveState();
   render();
 }
