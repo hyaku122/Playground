@@ -304,7 +304,7 @@ button {
 }
 
 .detail-screen {
-  padding-bottom: calc(116px + var(--safe-bottom));
+  padding-bottom: calc(168px + var(--safe-bottom));
 }
 
 .detail-header {
@@ -430,6 +430,8 @@ button {
   background: transparent;
   outline: none;
   word-break: break-word;
+  resize: none;
+  overflow: hidden;
 }
 
 .line-input:focus {
@@ -464,6 +466,14 @@ button {
 
 .toolbar {
   justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.bottom-nav {
+  display: grid;
+  grid-template-columns: 1fr 52px 1fr;
+  gap: 8px;
+  align-items: center;
 }
 
 .tool-button {

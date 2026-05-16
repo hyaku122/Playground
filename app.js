@@ -1,6 +1,6 @@
 const STORAGE_KEY = "memocho.v1";
 const BACKUP_PREFIX = "MEMOCHO:";
-const MARKERS = ["📝", "🛍️", "📅", "💡", "🏠", "🍳", "📚", "🎁", "🌿", "⭐", "📌", "🧺", "☕", "🧾", "🛠️", "🗒️"];
+const MARKERS = ["📝", "🛍️", "📅", "💡", "🏠", "🍳", "📚", "🎁", "🌿", "⭐", "📌", "🧺", "☕", "🧾", "🛠️", "🗒️", "📦", "🍮", "🍰", "🍪", "🍽️", "👗", "🍅", "🥕", "🥦"];
 
 const app = document.getElementById("app");
 
@@ -290,16 +290,6 @@ function renderDetail() {
 
   app.innerHTML = `
     <main class="screen detail-screen">
-      <header class="detail-header">
-        <div class="topbar">
-          <button class="nav-button" type="button" data-action="home">戻る</button>
-          <div class="row-actions">
-            <button class="icon-button" type="button" data-action="toggle-pin" data-note-id="${escapeHtml(note.id)}" aria-label="固定" title="固定">${note.pinned ? "📌" : "☆"}</button>
-            <button class="nav-button" type="button" data-action="home">完了</button>
-          </div>
-        </div>
-      </header>
-
       <input class="field title-input" data-field="note-title" type="text" value="${escapeHtml(note.title)}" placeholder="タイトル" autocomplete="off">
 
       <section class="tag-editor" aria-label="タグ">
@@ -338,9 +328,15 @@ function renderDetail() {
         ${renderToolButton("add-line", "＋", "行を追加")}
         ${renderToolButton("delete-line", "🗑", "行を削除")}
       </div>
+      <div class="bottom-nav" aria-label="メモ操作">
+        <button class="nav-button" type="button" data-action="home">戻る</button>
+        <button class="icon-button" type="button" data-action="toggle-pin" data-note-id="${escapeHtml(note.id)}" aria-label="固定" title="固定">${note.pinned ? "📌" : "☆"}</button>
+        <button class="nav-button" type="button" data-action="home">完了</button>
+      </div>
     </footer>
     ${renderToast()}
   `;
+  resizeAllLineInputs();
 }
 
 function renderOutlineRow(note, line) {
@@ -356,7 +352,7 @@ function renderOutlineRow(note, line) {
   return `
     <div class="outline-row level-${line.level} ${selected} ${checked} ${parentComplete} ${headingClass}" data-line-row="${escapeHtml(line.id)}">
       <div class="line-leading">${leading}</div>
-      <input class="line-input" data-field="line-text" data-line-id="${escapeHtml(line.id)}" type="text" value="${escapeHtml(line.text)}" placeholder="入力" autocomplete="off">
+      <textarea class="line-input" data-field="line-text" data-line-id="${escapeHtml(line.id)}" rows="1" placeholder="入力" autocomplete="off">${escapeHtml(line.text)}</textarea>
     </div>
   `;
 }
@@ -499,7 +495,24 @@ app.addEventListener("focusin", (event) => {
   if (target.dataset.field === "line-text") {
     view.selectedLineId = target.dataset.lineId;
     document.querySelectorAll("[data-line-row]").forEach((row) => row.classList.toggle("selected", row.dataset.lineRow === view.selectedLineId));
+    resizeLineInput(target);
   }
+});
+
+app.addEventListener("keydown", (event) => {
+  const target = event.target;
+  if (target.dataset.field !== "line-text") return;
+  if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+  event.preventDefault();
+  submitLineReturn(target);
+});
+
+app.addEventListener("beforeinput", (event) => {
+  const target = event.target;
+  if (target.dataset.field !== "line-text") return;
+  if (event.inputType !== "insertLineBreak" && event.inputType !== "insertParagraph") return;
+  event.preventDefault();
+  submitLineReturn(target);
 });
 
 app.addEventListener("blur", (event) => {
@@ -623,15 +636,7 @@ function handleDetailAction(action, el, note) {
   }
   if (action === "indent") line.level = Math.min(2, line.level + 1);
   if (action === "outdent") line.level = Math.max(0, line.level - 1);
-  if (action === "add-line") {
-    const index = note.outline.findIndex((item) => item.id === line.id);
-    const fresh = defaultLine("");
-    fresh.type = line.type;
-    fresh.level = line.level;
-    fresh.marker = line.marker || "📝";
-    note.outline.splice(index + 1, 0, fresh);
-    view.selectedLineId = fresh.id;
-  }
+  if (action === "add-line") addLineAfter(note, line);
   if (action === "delete-line") {
     if (note.outline.length === 1) {
       line.text = "";
@@ -700,7 +705,9 @@ function handleInput(target) {
     if (!note) return;
     const line = findLine(note, target.dataset.lineId);
     if (!line) return;
-    line.text = target.value;
+    line.text = target.value.replace(/\n/g, "");
+    target.value = line.text;
+    resizeLineInput(target);
     line.updatedAt = now();
     touchNote(note);
     saveState();
@@ -722,6 +729,16 @@ function handleChange(target) {
   if (target.dataset.field === "import-json") {
     importJsonFile(target.files && target.files[0]);
   }
+}
+
+function submitLineReturn(target) {
+  const note = findNote(view.noteId);
+  if (!note) return;
+  const line = findLine(note, target.dataset.lineId);
+  if (!line) return;
+  target.value = target.value.replace(/\n/g, "");
+  line.text = target.value;
+  handleLineReturn(note, line);
 }
 
 function updateQuickMemo() {
@@ -862,10 +879,60 @@ function reorderCheckedWithinParent(note, lineId) {
   note.outline = before.concat(blocks.flat(), after);
 }
 
+function addLineAfter(note, line) {
+  const index = note.outline.findIndex((item) => item.id === line.id);
+  const fresh = defaultLine("");
+  fresh.type = line.type;
+  fresh.level = line.level;
+  fresh.marker = line.marker || "📝";
+  fresh.checked = false;
+  note.outline.splice(index + 1, 0, fresh);
+  view.selectedLineId = fresh.id;
+  return fresh;
+}
+
+function handleLineReturn(note, line) {
+  if (!line.text.trim() && (line.type === "heading" || line.type === "check")) {
+    line.type = "text";
+    line.checked = false;
+    line.updatedAt = now();
+    view.markerPicker = false;
+    touchNote(note);
+    updateParentCompletion(note);
+    saveState();
+    render();
+    focusSelectedLine();
+    return;
+  }
+
+  addLineAfter(note, line);
+  line.updatedAt = now();
+  touchNote(note);
+  updateParentCompletion(note);
+  saveState();
+  render();
+  focusSelectedLine();
+}
+
+function resizeLineInput(input) {
+  if (!input || input.dataset.field !== "line-text") return;
+  input.style.height = "auto";
+  input.style.height = `${Math.max(36, input.scrollHeight)}px`;
+}
+
+function resizeAllLineInputs() {
+  window.setTimeout(() => {
+    app.querySelectorAll('[data-field="line-text"]').forEach(resizeLineInput);
+  }, 0);
+}
+
 function focusSelectedLine() {
   window.setTimeout(() => {
     const input = app.querySelector(`[data-field="line-text"][data-line-id="${safeCssValue(view.selectedLineId)}"]`);
-    if (input) input.focus();
+    if (input) {
+      input.focus();
+      resizeLineInput(input);
+    }
   }, 0);
 }
 
